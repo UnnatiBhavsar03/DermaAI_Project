@@ -102,67 +102,95 @@ def delete_scan(analysis_id):
 def generate_routine():
     try:
         data = request.json
-        # Check if data exists
         if not data:
             return jsonify({"status": "error", "message": "No data received"}), 400
             
         issue = data.get('issue')
-        choice = data.get('choice')
+        # choice is no longer strictly needed if we ask for everything, 
+        # but we can keep it if we want to focus generation. 
+        # For this requirement, we want EVERYTHING (Products + Remedies).
 
-        # Safety check: If issue is missing, Gemini won't know what to do
         if not issue:
             return jsonify({"status": "error", "message": "Skin issue description is missing"}), 400
 
-        print(f"--- Calling Gemini for: {issue} ({choice}) ---")
+        print(f"--- Calling Gemini for: {issue} ---")
 
-        prompt = f"As a professional dermatologist assistant, provide a step-by-step skincare routine for {issue}. "
-        if choice == 'Remedy':
-            prompt += "Focus strictly on natural home remedies, DIY treatments, and lifestyle habits."
-        else:
-            prompt += "Focus strictly on clinical skincare products and active ingredients."
-        
-        prompt += " Use clear bullet points. Keep it professional and under 100 words."
+        # Updated Prompt for JSON Structure
+        prompt = f"""
+        As a professional dermatologist assistant, verify the detected issue "{issue}" and provide a skincare routine.
+        Return ONLY a valid JSON object with the following structure. Do not wrap it in markdown code blocks.
+        {{
+            "routine_summary": "A brief overview of the daily routine (under 50 words).",
+            "products": [
+                {{
+                    "title": "Product Name/Type",
+                    "description": "How to use this product for {issue}.",
+                    "type": "Product"
+                }},
+                ... (3-4 items)
+            ],
+            "remedies": [
+                {{
+                    "title": "Remedy Name",
+                    "description": "Ingredients and instructions for {issue}.",
+                    "type": "Remedy"
+                }},
+                ... (2-3 items)
+            ]
+        }}
+        """
 
-        # New GenAI Syntax
         response = client.models.generate_content(
             model="models/gemini-1.5-flash",
-            contents=prompt
+            contents=prompt,
+             config={
+                'response_mime_type': 'application/json'
+            }
         )
 
         if not response or not response.text:
             return jsonify({"status": "error", "message": "Gemini returned an empty response"}), 500
 
-        return jsonify({"status": "success", "routine": response.text}), 200
+        # Attempt to parse JSON just to be safe, though response_mime_type helps
+        import json
+        try:
+            routine_data = json.loads(response.text)
+        except json.JSONDecodeError:
+            # Fallback cleanup if needed (rare with mime_type set)
+            clean_text = response.text.replace('```json', '').replace('```', '').strip()
+            routine_data = json.loads(clean_text)
+
+        return jsonify({"status": "success", "routine": routine_data}), 200
 
     except Exception as e:
-        # This will print the EXACT error (like "Invalid API Key" or "Network Error") in your terminal
         print(f"!!! GEMINI CRASH: {str(e)}") 
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/admin/verify-scan/<int:analysis_id>', methods=['PUT'])
-def verify_scan(analysis_id):
+@app.route('/api/admin/verify-scan-batch/<int:analysis_id>', methods=['POST'])
+def verify_scan_batch(analysis_id):
     try:
-        data = request.json
+        data = request.json # Expects { "recommendations": [...] }
         scan = SkinAnalysis.query.get(analysis_id)
         if not scan: return jsonify({"status": "error", "message": "Scan not found"}), 404
         
         scan.is_reviewed = True
         
-        # Save to Recommendations table (Matches your SQL columns)
-        if data and 'recommendation' in data:
+        recommendations = data.get('recommendations', [])
+        
+        for rec in recommendations:
             new_rec = Recommendations(
                 analysis_id=analysis_id,
-                type=data.get('type', 'Remedy'), # Remedy or Product
+                type=rec.get('type', 'Remedy'), # Default to Remedy
                 model_version='Gemini-1.5-Flash',
-                title=f"Expert Advice for {scan.detected_issue}",
-                description=data.get('recommendation'),
-                link=data.get('link', ''), # Optional field from your table
+                title=rec.get('title', 'Expert Advice'),
+                description=rec.get('description', ''),
+                link=rec.get('link', ''), 
                 admin_status='Verified'
             )
             db.session.add(new_rec)
         
         db.session.commit()
-        return jsonify({"status": "success"}), 200
+        return jsonify({"status": "success", "message": "Batch verified successfully"}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500

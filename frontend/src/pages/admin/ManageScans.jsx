@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Check,
   Eye,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 
 const ManageScans = () => {
+  const navigate = useNavigate();
   const [scans, setScans] = useState([]);
   const [selectedScan, setSelectedScan] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -130,22 +132,17 @@ const ManageScans = () => {
                   </td>
                   <td className="px-6 py-4">
                     <span
-                      className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                        scan.is_reviewed
-                          ? "bg-green-100 text-green-700"
-                          : "bg-amber-100 text-amber-700"
-                      }`}
+                      className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider ${scan.is_reviewed
+                        ? "bg-green-100 text-green-700"
+                        : "bg-amber-100 text-amber-700"
+                        }`}
                     >
                       {scan.is_reviewed ? "Verified" : "Pending Review"}
                     </span>
                   </td>
                   <td className="px-6 py-4 flex justify-center gap-3">
                     <button
-                      onClick={() => {
-                        setSelectedScan(scan);
-                        setRecommendation("");
-                        setRecType("Remedy");
-                      }}
+                      onClick={() => navigate(`/dashboard/verification/${scan.analysis_id}`)}
                       className="p-3 bg-white border border-slate-200 hover:text-indigo-600 rounded-2xl transition-all shadow-sm"
                       title="View Details"
                     >
