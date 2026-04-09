@@ -46,3 +46,6 @@ backend/instance/
 *.njsproj
 *.sln
 *.sw?
+uploads/
+tmp/
+temp/

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowRight, Scan, Clock, Activity, Plus, Sparkles, TrendingUp, Calendar } from 'lucide-react';
+import { ArrowRight, Scan, Clock, Activity, Plus, Sparkles, TrendingUp, Calendar, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const UserDashboard = () => {
@@ -45,6 +45,35 @@ const UserDashboard = () => {
         if (hour < 12) return 'Good Morning';
         if (hour < 18) return 'Good Afternoon';
         return 'Good Evening';
+    };
+
+    const handleDeleteScan = async (e, analysis_id) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (!window.confirm("Are you sure you want to delete this pending scan?")) return;
+
+        try {
+            const res = await fetch(`http://localhost:5001/api/user/scan/${analysis_id}?user_id=${user.user_id}`, {
+                method: 'DELETE'
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                const deletedScan = scans.find(s => s.analysis_id === analysis_id);
+                setScans(prev => prev.filter(s => s.analysis_id !== analysis_id));
+                setStats(prev => ({
+                    ...prev,
+                    total: prev.total - 1,
+                    pending: prev.pending - 1,
+                    issues_detected: deletedScan && deletedScan.detected_issue !== 'No Issue' ? prev.issues_detected - 1 : prev.issues_detected
+                }));
+            } else {
+                alert(data.message || "Failed to delete scan");
+            }
+        } catch (err) {
+            console.error("Delete error:", err);
+            alert("Network error while trying to delete.");
+        }
     };
 
     return (
@@ -199,8 +228,17 @@ const UserDashboard = () => {
                                             </p>
                                         </div>
                                     </div>
-                                    <div className={`p-2 rounded-full ${scan.is_reviewed ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
-                                        {scan.is_reviewed ? <Activity size={16} /> : <Clock size={16} />}
+                                    <div className="flex gap-2 relative z-20">
+                                        <button
+                                            onClick={(e) => handleDeleteScan(e, scan.analysis_id)}
+                                            className="p-2 rounded-full bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors shadow-sm"
+                                            title="Delete Scan"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                        <div className={`p-2 rounded-full ${scan.is_reviewed ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
+                                            {scan.is_reviewed ? <Activity size={16} /> : <Clock size={16} />}
+                                        </div>
                                     </div>
                                 </div>
 

@@ -1,16 +1,71 @@
-import React, { useState, useRef } from 'react';
-import { Upload, ArrowRight, Activity, AlertCircle, Sparkles, Camera, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, ArrowRight, Activity, AlertCircle, Sparkles, Camera, X, Clock, CheckCircle } from 'lucide-react';
 const ProgressReport = () => {
-    const navigate = useNavigate(); // Kept for potential future use or consistency, though currently unused in logic.
-    // Actually, let's remove it if it's truly unused to fix the lint, or use it if we want to redirect after success?
-    // User didn't ask for redirect. I'll remove it to be clean.
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     const [file, setFile] = useState(null);
     const [preview, setPreview] = useState(null);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
+    const [history, setHistory] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(true);
+
+    useEffect(() => {
+        if (user.user_id) {
+            fetch(`http://localhost:5001/api/user/comparison-history/${user.user_id}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        setHistory(data.history || []);
+                    }
+                    setHistoryLoading(false);
+                })
+                .catch(err => {
+                    console.error("Error fetching comparison history:", err);
+                    setHistoryLoading(false);
+                });
+        } else {
+            setHistoryLoading(false);
+        }
+    }, [user.user_id]);
+
+    const handleHistoryClick = (record) => {
+        setResult({
+            status: "success",
+            previous_image_url: record.previous_image_url ? record.previous_image_url.replace('http://localhost:5001', '') : null,
+            current_image_url: record.current_image_url ? record.current_image_url.replace('http://localhost:5001', '') : null,
+            is_history_view: true,
+            is_approved: record.is_approved,
+            result: {
+                comparison_summary: record.comparison_summary,
+                status: record.status,
+                detected_issue: record.detected_issue,
+                improvement_score: record.improvement_score
+            }
+        });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleDeleteHistory = async (e, history_id) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (!window.confirm("Are you sure you want to delete this comparison history record?")) return;
+
+        try {
+            const res = await fetch(`http://localhost:5001/api/user/comparison-history/${history_id}?user_id=${user.user_id}`, {
+                method: 'DELETE'
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                setHistory(prev => prev.filter(h => h.history_id !== history_id));
+            } else {
+                alert(data.message || "Failed to delete comparison history");
+            }
+        } catch (err) {
+            console.error("Delete error:", err);
+            alert("Network error while trying to delete.");
+        }
+    };
 
     // Camera State
     const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -213,8 +268,14 @@ const ProgressReport = () => {
                                 <Sparkles size={24} />
                             </div>
                             <div>
-                                <h2 className="text-2xl font-bold">Progress Report</h2>
-                                <p className="text-slate-400 text-sm font-medium">AI-Generated Comparison</p>
+                                <h2 className="text-2xl font-bold">
+                                    {result.is_history_view ? "Historical Progress Report" : "Progress Report"}
+                                </h2>
+                                <p className="text-slate-400 text-sm font-medium">
+                                    {result.is_history_view
+                                        ? (result.is_approved ? "Verified by Admin" : "Pending Verification")
+                                        : "AI-Generated Comparison"}
+                                </p>
                             </div>
                         </div>
 
@@ -276,6 +337,80 @@ const ProgressReport = () => {
                             </div>
 
                         </div>
+                    </div>
+                )}
+            </div>
+            {/* Comparison History Section */}
+            <div className="mt-16 border-t border-slate-200 pt-12">
+                <div className="mb-8 pl-4">
+                    <h2 className="text-3xl font-black text-slate-900 flex items-center gap-3">
+                        <Clock className="text-violet-600" /> Comparison History
+                    </h2>
+                    <p className="text-slate-500 font-medium mt-2">View your past progress reports and their verification status.</p>
+                </div>
+
+                {historyLoading ? (
+                    <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div></div>
+                ) : history.length > 0 ? (
+                    <div className="grid md:grid-cols-2 gap-6">
+                        {history.map((record) => (
+                            <div
+                                key={record.history_id}
+                                onClick={() => handleHistoryClick(record)}
+                                className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 hover:shadow-md transition-all cursor-pointer group hover:scale-[1.02]"
+                            >
+                                <div className="flex items-center justify-between mb-4">
+                                    <span className="text-sm font-bold text-slate-500">{record.created_at}</span>
+                                    <div className="flex items-center gap-2">
+                                        {record.is_approved ? (
+                                            <span className="px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold flex items-center gap-1"><CheckCircle size={14} /> Verified</span>
+                                        ) : (
+                                            <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-bold flex items-center gap-1"><Clock size={14} /> Pending Verification</span>
+                                        )}
+                                        <button
+                                            onClick={(e) => handleDeleteHistory(e, record.history_id)}
+                                            className="p-1.5 rounded-full bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors shadow-sm"
+                                            title="Delete History"
+                                        >
+                                            <X size={16} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3 mb-4">
+                                    {record.previous_image_url && (
+                                        <div className="flex-1">
+                                            <p className="text-[10px] uppercase tracking-widest font-bold text-slate-500 mb-1">Previous</p>
+                                            <img src={`http://localhost:5001${record.previous_image_url}`} alt="Previous" className="w-full h-24 object-cover rounded-xl border border-slate-100" />
+                                        </div>
+                                    )}
+                                    {record.current_image_url && (
+                                        <div className="flex-1">
+                                            <p className="text-[10px] uppercase tracking-widest font-bold text-violet-600 mb-1">Current</p>
+                                            <img src={`http://localhost:5001${record.current_image_url}`} alt="Current" className="w-full h-24 object-cover rounded-xl border-2 border-violet-200" />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="bg-slate-50 rounded-2xl p-4">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className={`font-black ${record.status === 'Improved' ? 'text-green-600' : record.status === 'Worsened' ? 'text-red-600' : 'text-blue-600'}`}>
+                                            {record.status}
+                                        </span>
+                                        {record.improvement_score !== undefined && record.improvement_score !== null && (
+                                            <span className={`font-black ${record.improvement_score > 0 ? 'text-green-600' : record.improvement_score < 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                                                {record.improvement_score > 0 ? '+' : ''}{record.improvement_score}%
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{record.comparison_summary}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="bg-slate-50 rounded-[2rem] py-12 text-center text-slate-500 font-medium border-2 border-dashed border-slate-200">
+                        No comparison history found. Capture a photo to get started!
                     </div>
                 )}
             </div>

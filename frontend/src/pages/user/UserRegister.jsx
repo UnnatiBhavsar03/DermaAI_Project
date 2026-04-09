@@ -45,8 +45,24 @@ const UserRegister = () => {
         });
     };
 
+    const validatePassword = (password) => {
+        if (password.length < 8) return "Password must be at least 8 characters long.";
+        if (!/[A-Z]/.test(password)) return "Password must contain at least one uppercase letter.";
+        if (!/[a-z]/.test(password)) return "Password must contain at least one lowercase letter.";
+        if (!/\d/.test(password)) return "Password must contain at least one numeric digit.";
+        if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) return "Password must contain at least one special character.";
+        return null;
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        const passwordError = validatePassword(formData.password);
+        if (passwordError) {
+            addToast(passwordError, "error");
+            return;
+        }
+
         setLoading(true);
 
         try {

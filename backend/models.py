@@ -25,6 +25,7 @@ class User(db.Model):
     allergies = db.Column(db.String(255), nullable=True)
     reset_otp = db.Column(db.String(6), nullable=True) # 6-digit OTP
     otp_expiry = db.Column(db.DateTime, nullable=True)
+    is_deleted = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 # 3. Skin Analysis Table (For "Total Scans" card and "Issues" chart)
@@ -40,6 +41,8 @@ class SkinAnalysis(db.Model):
     image_path = db.Column(db.String(255), nullable=False)
     user_preference = db.Column(db.String(20)) # 'Remedy' or 'Product'
     is_sent = db.Column(db.Boolean, default=False)
+    is_deleted = db.Column(db.Boolean, default=False)
+    user_deleted = db.Column(db.Boolean, default=False)
 
     
     # Change 'created_at' to match your actual MySQL column name
@@ -47,6 +50,19 @@ class SkinAnalysis(db.Model):
     
     # Relationship
     user = db.relationship('User', backref=db.backref('scans', lazy=True))
+
+class ComparisonHistory(db.Model):
+    __tablename__ = 'comparison_history'
+    history_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=False)
+    analysis_id = db.Column(db.Integer, db.ForeignKey('skin_analysis.analysis_id'), nullable=False)
+    previous_analysis_id = db.Column(db.Integer, db.ForeignKey('skin_analysis.analysis_id'), nullable=True)
+    comparison_summary = db.Column(db.Text)
+    status = db.Column(db.String(50))
+    improvement_score = db.Column(db.Integer, nullable=True)
+    is_approved = db.Column(db.Boolean, default=False)
+    user_deleted = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Recommendations(db.Model):
     __tablename__ = 'recommendations'

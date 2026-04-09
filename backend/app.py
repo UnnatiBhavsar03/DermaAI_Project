@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
 from sqlalchemy import func
-from models import db, Admin, User, SkinAnalysis, Recommendations, ProductReview, Session
+from models import db, Admin, User, SkinAnalysis, Recommendations, ProductReview, Session, ComparisonHistory
 from datetime import date, datetime, timedelta
 import json
 import base64
@@ -81,7 +81,7 @@ def user_register():
 def user_login():
     try:
         data = request.json
-        user = User.query.filter_by(email=data.get('email')).first()
+        user = User.query.filter(User.email == data.get('email'), (User.is_deleted == False) | (User.is_deleted == None)).first()
         
         if user and check_password_hash(user.password, data.get('password')):
             
@@ -193,13 +193,13 @@ def get_dashboard_data():
         db.session.commit()
         today = date.today()
         stats = {
-            "total_users": User.query.count(),
-            "total_scans": SkinAnalysis.query.count(),
-            "pending_reviews": SkinAnalysis.query.filter_by(is_reviewed=False).count(),
-            "todays_scans": SkinAnalysis.query.filter(func.date(SkinAnalysis.analysis_date) == today).count()
+            "total_users": User.query.filter((User.is_deleted == False) | (User.is_deleted == None)).count(),
+            "total_scans": SkinAnalysis.query.filter_by(is_deleted=False).count(),
+            "pending_reviews": SkinAnalysis.query.filter_by(is_reviewed=False, is_deleted=False).count(),
+            "todays_scans": SkinAnalysis.query.filter(SkinAnalysis.is_deleted==False, func.date(SkinAnalysis.analysis_date) == today).count()
         }
         # Skin Type Distribution
-        skin_type_query = db.session.query(User.skin_type, func.count(User.user_id)).group_by(User.skin_type).all()
+        skin_type_query = db.session.query(User.skin_type, func.count(User.user_id)).filter((User.is_deleted == False) | (User.is_deleted == None)).group_by(User.skin_type).all()
         
         # User Growth Logic based on Range
         time_range = request.args.get('range', 'week') # week, month, year
@@ -211,7 +211,7 @@ def get_dashboard_data():
             daily_users = db.session.query(
                 func.date(User.created_at).label('date'), 
                 func.count(User.user_id)
-            ).filter(User.created_at >= start_date).group_by(func.date(User.created_at)).all()
+            ).filter(User.created_at >= start_date, (User.is_deleted == False) | (User.is_deleted == None)).group_by(func.date(User.created_at)).all()
             
             growth_map = {str(day): count for day, count in daily_users}
             # Sample every 5 days to avoid crowding
@@ -230,7 +230,7 @@ def get_dashboard_data():
             monthly_users = db.session.query(
                 func.strftime('%Y-%m', User.created_at).label('month'), 
                 func.count(User.user_id)
-            ).filter(User.created_at >= start_date).group_by(func.strftime('%Y-%m', User.created_at)).all()
+            ).filter(User.created_at >= start_date, (User.is_deleted == False) | (User.is_deleted == None)).group_by(func.strftime('%Y-%m', User.created_at)).all()
             
             growth_map = {month: count for month, count in monthly_users}
             
@@ -253,7 +253,7 @@ def get_dashboard_data():
             daily_users = db.session.query(
                 func.date(User.created_at).label('date'), 
                 func.count(User.user_id)
-            ).filter(User.created_at >= seven_days_ago).group_by(func.date(User.created_at)).all()
+            ).filter(User.created_at >= seven_days_ago, (User.is_deleted == False) | (User.is_deleted == None)).group_by(func.date(User.created_at)).all()
             
             growth_map = {str(day): count for day, count in daily_users}
             for i in range(7):
@@ -265,7 +265,7 @@ def get_dashboard_data():
                 })
 
         # Recent Users (Top 5)
-        recent_users_query = User.query.order_by(User.created_at.desc()).limit(5).all()
+        recent_users_query = User.query.filter((User.is_deleted == False) | (User.is_deleted == None)).order_by(User.created_at.desc()).limit(5).all()
         recent_users_data = [{
             "id": u.user_id,
             "name": u.name,
@@ -293,7 +293,7 @@ def get_dashboard_data():
 def get_all_scans():
     try:
         db.session.commit()
-        scans = SkinAnalysis.query.order_by(SkinAnalysis.analysis_date.desc()).all()
+        scans = SkinAnalysis.query.filter_by(is_deleted=False).order_by(SkinAnalysis.analysis_date.desc()).all()
         output = []
         for s in scans:
             user_allergies = []
@@ -308,6 +308,14 @@ def get_all_scans():
                 analysis_id=s.analysis_id, admin_status='Flagged'
             ).first() is not None
 
+            previous_image_path = None
+            if s.scan_type == "Progress Report":
+                ch = ComparisonHistory.query.filter_by(analysis_id=s.analysis_id).first()
+                if ch and ch.previous_analysis_id:
+                    prev_scan = SkinAnalysis.query.get(ch.previous_analysis_id)
+                    if prev_scan:
+                        previous_image_path = prev_scan.image_path
+
             output.append({
                 "analysis_id": s.analysis_id,
                 "detected_issue": s.detected_issue,
@@ -318,6 +326,7 @@ def get_all_scans():
                 "is_sent": s.is_sent,
                 "is_flagged": is_flagged,
                 "image_path": s.image_path,
+                "previous_image_path": previous_image_path,
                 "analysis_date": s.analysis_date.isoformat(),
                 "user_id": s.user.user_id if s.user else None,
                 "user_name": s.user.name if s.user else "Anonymous",
@@ -332,7 +341,7 @@ def get_all_scans():
 def get_all_users():
     try:
         db.session.commit()
-        users = User.query.order_by(User.user_id.desc()).all()
+        users = User.query.filter((User.is_deleted == False) | (User.is_deleted == None)).order_by(User.user_id.desc()).all()
         output = []
         for u in users:
             parsed_allergies = []
@@ -402,13 +411,16 @@ def deactivate_account(user_id):
         if not user:
             return jsonify({"status": "error", "message": "User not found"}), 404
 
+        has_linked_records = SkinAnalysis.query.filter_by(user_id=user_id).first() or ComparisonHistory.query.filter_by(user_id=user_id).first()
+        
+        if has_linked_records:
+            user.is_deleted = True
+            db.session.commit()
+            return jsonify({"status": "success", "message": "Account deactivated (soft-deleted)"}), 200
+
         # Delete child records in dependency order to satisfy FK constraints
         Session.query.filter_by(user_id=user_id).delete(synchronize_session=False)
         ProductReview.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        user_scans = SkinAnalysis.query.filter_by(user_id=user_id).all()
-        for scan in user_scans:
-            Recommendations.query.filter_by(analysis_id=scan.analysis_id).delete(synchronize_session=False)
-        SkinAnalysis.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
         db.session.delete(user)
         db.session.commit()
@@ -424,13 +436,16 @@ def delete_user(user_id):
         if not user:
             return jsonify({"status": "error", "message": "User not found"}), 404
 
+        has_linked_records = SkinAnalysis.query.filter_by(user_id=user_id).first() or ComparisonHistory.query.filter_by(user_id=user_id).first()
+        
+        if has_linked_records:
+            user.is_deleted = True
+            db.session.commit()
+            return jsonify({"status": "success", "message": "User soft-deleted successfully due to linked records"}), 200
+
         # Delete child records in dependency order to satisfy FK constraints
         Session.query.filter_by(user_id=user_id).delete(synchronize_session=False)
         ProductReview.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        user_scans = SkinAnalysis.query.filter_by(user_id=user_id).all()
-        for scan in user_scans:
-            Recommendations.query.filter_by(analysis_id=scan.analysis_id).delete(synchronize_session=False)
-        SkinAnalysis.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
         db.session.delete(user)
         db.session.commit()
@@ -448,18 +463,20 @@ def delete_users_batch():
         if not user_ids:
              return jsonify({"status": "error", "message": "No users selected"}), 400
 
-        # Delete child records in dependency order to satisfy FK constraints
-        Session.query.filter(Session.user_id.in_(user_ids)).delete(synchronize_session=False)
-        ProductReview.query.filter(ProductReview.user_id.in_(user_ids)).delete(synchronize_session=False)
-        batch_scans = SkinAnalysis.query.filter(SkinAnalysis.user_id.in_(user_ids)).all()
-        scan_ids = [s.analysis_id for s in batch_scans]
-        if scan_ids:
-            Recommendations.query.filter(Recommendations.analysis_id.in_(scan_ids)).delete(synchronize_session=False)
-        SkinAnalysis.query.filter(SkinAnalysis.user_id.in_(user_ids)).delete(synchronize_session=False)
-        User.query.filter(User.user_id.in_(user_ids)).delete(synchronize_session=False)
+        for uid in user_ids:
+            user = User.query.get(uid)
+            if user:
+                has_linked = SkinAnalysis.query.filter_by(user_id=uid).first() or ComparisonHistory.query.filter_by(user_id=uid).first()
+                if has_linked:
+                    user.is_deleted = True
+                else:
+                    Session.query.filter_by(user_id=uid).delete(synchronize_session=False)
+                    ProductReview.query.filter_by(user_id=uid).delete(synchronize_session=False)
+                    db.session.delete(user)
+        
         db.session.commit()
         
-        return jsonify({"status": "success", "message": f"{len(user_ids)} users deleted successfully"}), 200
+        return jsonify({"status": "success", "message": f"{len(user_ids)} users processed successfully"}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -472,25 +489,65 @@ def update_user(user_id):
             return jsonify({"status": "error", "message": "User not found"}), 404
         
         data = request.json
-        # Only update allowed fields
-        if 'name' in data: user.name = data['name']
-        if 'email' in data: user.email = data['email']
-        if 'skin_type' in data: user.skin_type = data['skin_type']
-        if 'gender' in data: user.gender = data['gender']
+        old_email = user.email
+        email_changed = False
+        other_changed = False
+        
+        if 'name' in data and data['name'] != user.name:
+            user.name = data['name']
+            other_changed = True
+            
+        if 'email' in data and data['email'] != user.email:
+            user.email = data['email']
+            email_changed = True
+            
+        if 'skin_type' in data and data['skin_type'] != user.skin_type:
+            user.skin_type = data['skin_type']
+            other_changed = True
+            
+        if 'gender' in data and data['gender'] != user.gender:
+            user.gender = data['gender']
+            other_changed = True
+            
         if 'allergies' in data: 
             allergies_data = data['allergies']
-            user.allergies = json.dumps(allergies_data) if isinstance(allergies_data, list) else allergies_data
+            new_al = json.dumps(allergies_data) if isinstance(allergies_data, list) else allergies_data
+            if new_al != user.allergies:
+                user.allergies = new_al
+                other_changed = True
         
         if 'birth_date' in data:
             if data['birth_date']: # not empty string
                 try:
-                    user.birth_date = datetime.strptime(data['birth_date'], '%Y-%m-%d').date()
+                    new_date = datetime.strptime(data['birth_date'], '%Y-%m-%d').date()
+                    if new_date != user.birth_date:
+                        user.birth_date = new_date
+                        other_changed = True
                 except ValueError:
                     return jsonify({"status": "error", "message": "Invalid date format. Use YYYY-MM-DD"}), 400
             else:
-                user.birth_date = None
+                if user.birth_date is not None:
+                    user.birth_date = None
+                    other_changed = True
         
         db.session.commit()
+        
+        # Dispatch Emails securely using built-in smtplib
+        if email_changed:
+            send_email(
+                user.email,
+                "Your Account Email Has Been Updated",
+                f"Hello {user.name},\n\nYour DermaAI account email has been successfully updated to this new address by an administrator.\n\nIf you did not expect this change, please contact support immediately."
+            )
+            
+        if other_changed:
+            target_email = user.email if email_changed else old_email
+            send_email(
+                target_email,
+                "Your Account Details Have Been Updated",
+                f"Hello {user.name},\n\nAn administrator has successfully updated your personal details (such as your name, skin profile, or demographic info) on your DermaAI account.\n\nYou can review these changes by logging into your profile.\n\nIf you did not expect this change, please contact support."
+            )
+
         return jsonify({"status": "success", "message": "User updated successfully"}), 200
     except Exception as e:
         db.session.rollback()
@@ -544,11 +601,22 @@ def delete_scan(analysis_id):
         scan = SkinAnalysis.query.get(analysis_id)
         if not scan:
             return jsonify({"status": "error", "message": "Not found"}), 404
-        # Delete linked recommendations first to satisfy FK constraint
-        Recommendations.query.filter_by(analysis_id=analysis_id).delete(synchronize_session=False)
-        db.session.delete(scan)
-        db.session.commit()
-        return jsonify({"status": "success", "message": "Deleted"}), 200
+        # Check if linked to comparison history
+        linked_history = ComparisonHistory.query.filter(
+            (ComparisonHistory.analysis_id == analysis_id) | 
+            (ComparisonHistory.previous_analysis_id == analysis_id)
+        ).first()
+
+        if linked_history:
+            scan.is_deleted = True
+            db.session.commit()
+            return jsonify({"status": "success", "message": "Scan soft-deleted successfully due to linked comparison history"}), 200
+        else:
+            # Delete linked recommendations first to satisfy FK constraint
+            Recommendations.query.filter_by(analysis_id=analysis_id).delete(synchronize_session=False)
+            db.session.delete(scan)
+            db.session.commit()
+            return jsonify({"status": "success", "message": "Deleted"}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -792,7 +860,7 @@ def generate_routine():
             # 2. Retry with Gemini Key 2
             try:
                 print("Attempting Gemini (Key 2)...")
-                client2 = genai.Client(api_key="AIzaSyDlCB73Fa6IxijXY_clZGtyI1Nxn17Pspk")
+                client2 = genai.Client(api_key=os.environ.get("GEMINI_API_KEY_2"))
                 response2 = client2.models.generate_content(
                     model="gemini-flash-latest",
                     contents=prompt,
@@ -882,6 +950,11 @@ def verify_scan(analysis_id):
         # Mark scan as reviewed
         scan.is_reviewed = True
         
+        # Approve comparison history if it exists
+        comp_history = ComparisonHistory.query.filter_by(analysis_id=analysis_id).first()
+        if comp_history:
+            comp_history.is_approved = True
+            
         # Save Recommendation
         new_rec = Recommendations(
             analysis_id=analysis_id,
@@ -910,6 +983,11 @@ def verify_scan_batch(analysis_id):
         Recommendations.query.filter_by(analysis_id=analysis_id).delete()
         
         scan.is_reviewed = True
+        # Approve comparison history if it exists
+        comp_history = ComparisonHistory.query.filter_by(analysis_id=analysis_id).first()
+        if comp_history:
+            comp_history.is_approved = True
+            
         # NOTE: We do NOT set is_sent=True here. That requires a separate action.
         
         recommendations = data.get('recommendations', [])
@@ -1236,10 +1314,35 @@ def analyze_skin():
 # ==========================================================
 # --- 7. USER HISTORY & PREFERENCES ---
 # ==========================================================
+@app.route('/api/user/profile/<int:user_id>', methods=['GET'])
+def get_user_profile(user_id):
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"status": "error", "message": "User not found"}), 404
+            
+        try:
+            allergies_list = json.loads(user.allergies) if user.allergies else []
+        except:
+            allergies_list = [user.allergies] if user.allergies else []
+            
+        user_data = {
+            "user_id": user.user_id,
+            "name": user.name,
+            "email": user.email,
+            "skin_type": user.skin_type,
+            "gender": user.gender,
+            "birth_date": user.birth_date.strftime("%Y-%m-%d") if user.birth_date else None,
+            "allergies": allergies_list,
+            "created_at": user.created_at.isoformat() if user.created_at else None
+        }
+        return jsonify({"status": "success", "user": user_data}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 @app.route('/api/user/scans/<int:user_id>', methods=['GET'])
 def get_user_scans(user_id):
     try:
-        scans = SkinAnalysis.query.filter_by(user_id=user_id).order_by(SkinAnalysis.analysis_date.desc()).all()
+        scans = SkinAnalysis.query.filter_by(user_id=user_id, is_deleted=False, user_deleted=False).order_by(SkinAnalysis.analysis_date.desc()).all()
         output = [{
             "analysis_id": s.analysis_id,
             "detected_issue": s.detected_issue,
@@ -1252,6 +1355,83 @@ def get_user_scans(user_id):
         } for s in scans]
         return jsonify({"status": "success", "scans": output}), 200
     except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/user/scan/<int:analysis_id>', methods=['DELETE'])
+def delete_user_scan(analysis_id):
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({"status": "error", "message": "User ID required"}), 400
+            
+        scan = SkinAnalysis.query.get(analysis_id)
+        if not scan or scan.user_deleted:
+            return jsonify({"status": "error", "message": "Scan not found"}), 404
+            
+        if str(scan.user_id) != str(user_id):
+            return jsonify({"status": "error", "message": "Unauthorized"}), 403
+            
+        if scan.is_reviewed:
+            scan.user_deleted = True
+        else:
+            # Manually delete dependent records to avoid Foreign Key constraint errors
+            ComparisonHistory.query.filter_by(analysis_id=scan.analysis_id).delete()
+            ComparisonHistory.query.filter_by(previous_analysis_id=scan.analysis_id).update({"previous_analysis_id": None})
+            Recommendations.query.filter_by(analysis_id=scan.analysis_id).delete()
+            db.session.delete(scan)
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Scan deleted successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/user/comparison-history/<int:user_id>', methods=['GET'])
+def get_comparison_history(user_id):
+    try:
+        history = ComparisonHistory.query.filter_by(user_id=user_id, user_deleted=False).order_by(ComparisonHistory.created_at.desc()).all()
+        output = []
+        for h in history:
+            current_scan = SkinAnalysis.query.get(h.analysis_id)
+            prev_scan = SkinAnalysis.query.get(h.previous_analysis_id) if h.previous_analysis_id else None
+            
+            output.append({
+                "history_id": h.history_id,
+                "comparison_summary": h.comparison_summary,
+                "status": h.status,
+                "detected_issue": current_scan.detected_issue if current_scan else "Unknown",
+                "improvement_score": h.improvement_score,
+                "is_approved": h.is_approved,
+                "created_at": h.created_at.strftime("%d %b, %Y"),
+                "current_image_url": f"/uploads/{current_scan.image_path}" if current_scan else None,
+                "previous_image_url": f"/uploads/{prev_scan.image_path}" if prev_scan else None
+            })
+        return jsonify({"status": "success", "history": output}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/user/comparison-history/<int:history_id>', methods=['DELETE'])
+def delete_comparison_history(history_id):
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({"status": "error", "message": "User ID required"}), 400
+            
+        history = ComparisonHistory.query.get(history_id)
+        if not history or history.user_deleted:
+            return jsonify({"status": "error", "message": "History record not found"}), 404
+            
+        if str(history.user_id) != str(user_id):
+            return jsonify({"status": "error", "message": "Unauthorized"}), 403
+            
+        if history.is_approved:
+            history.user_deleted = True
+        else:
+            db.session.delete(history)
+            
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Comparison history deleted successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/user/scan-preference', methods=['POST'])
@@ -1643,6 +1823,19 @@ def progress_report():
                     analysis_date=datetime.utcnow()
                 )
                 db.session.add(new_scan)
+                db.session.commit()
+                
+                # Immediately persist Comparison History
+                new_comp = ComparisonHistory(
+                    user_id=user_id,
+                    analysis_id=new_scan.analysis_id,
+                    previous_analysis_id=previous_scan.analysis_id if previous_scan else None,
+                    comparison_summary=analysis_result.get('comparison_summary', ''),
+                    status=analysis_result.get('status', 'Unknown'),
+                    improvement_score=improvement_score,
+                    is_approved=False
+                )
+                db.session.add(new_comp)
                 db.session.commit()
                 
                 return jsonify({

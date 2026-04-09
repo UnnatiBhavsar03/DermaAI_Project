@@ -142,15 +142,28 @@ const ProgressReports = () => {
                         scans.filter(s => s.user_id === selectedUser.user_id).map((scan) => (
                             <div key={scan.analysis_id} className="bg-white rounded-[2rem] p-6 shadow-xl shadow-slate-200/50 border border-mint-100 flex flex-col md:flex-row gap-6 items-start">
                                 {/* Image Section */}
-                                <div className="w-full md:w-64 shrink-0">
-                                    <div className="aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 relative group">
+                                <div className="w-full md:w-auto shrink-0 flex flex-col sm:flex-row gap-4 max-w-full overflow-x-auto pb-2 md:pb-0">
+                                    {scan.previous_image_path && (
+                                        <div className="w-full sm:w-48 shrink-0 aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 relative group border border-slate-200">
+                                            <img
+                                                src={`http://localhost:5001/uploads/${scan.previous_image_path.split('/').pop()}`}
+                                                alt="Previous Scan"
+                                                className="w-full h-full object-cover opacity-80"
+                                            />
+                                            <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors" />
+                                            <span className="absolute top-3 left-3 bg-slate-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider shadow-sm">
+                                                Previous
+                                            </span>
+                                        </div>
+                                    )}
+                                    <div className="w-full sm:w-48 shrink-0 aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 relative group shadow-sm">
                                         <img
                                             src={`http://localhost:5001/uploads/${scan.image_path.split('/').pop()}`}
                                             alt="Progress Scan"
-                                            className="w-full h-full object-cover"
+                                            className="w-full h-full object-cover border-[3px] border-mint-400 rounded-2xl box-border"
                                         />
                                         <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors" />
-                                        <span className="absolute top-3 left-3 bg-mint-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">
+                                        <span className="absolute top-3 left-3 bg-mint-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider shadow-sm">
                                             Current
                                         </span>
                                     </div>

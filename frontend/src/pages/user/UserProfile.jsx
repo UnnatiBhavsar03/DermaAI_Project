@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Calendar, Smile, Shield, Save, X, Camera, Edit3, Check, Trash2, Lock, LogOut } from 'lucide-react';
+import { User, Mail, Calendar, Smile, Shield, Save, X, Camera, Edit3, Check, Trash2, Lock, LogOut, UserCircle, AlertTriangle, Gift } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -20,7 +20,10 @@ const UserProfile = () => {
     const [formData, setFormData] = useState({
         name: '',
         skin_type: '',
-        email: ''
+        email: '',
+        gender: '',
+        birth_date: '',
+        allergies: ''
     });
 
     const [passwordData, setPasswordData] = useState({
@@ -33,9 +36,36 @@ const UserProfile = () => {
         setFormData({
             name: user.name || '',
             skin_type: user.skin_type || '',
-            email: user.email || ''
+            email: user.email || '',
+            gender: user.gender || '',
+            birth_date: user.birth_date || '',
+            allergies: Array.isArray(user.allergies) ? user.allergies.join(', ') : (user.allergies || '')
         });
-    }, [user]);
+    }, [user.name, user.skin_type, user.email, user.gender, user.birth_date, user.allergies]);
+
+    // Fetch latest user data from backend on load & poll
+    useEffect(() => {
+        if (!user.user_id) return;
+
+        const fetchProfile = () => {
+            fetch(`http://localhost:5001/api/user/profile/${user.user_id}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success' && data.user) {
+                        setUser(prevUser => {
+                            const freshUser = { ...prevUser, ...data.user };
+                            localStorage.setItem('user', JSON.stringify(freshUser));
+                            return freshUser;
+                        });
+                    }
+                })
+                .catch(err => console.error("Failed to fetch fresh user profile:", err));
+        };
+
+        fetchProfile(); // initial fetch
+        const intervalId = setInterval(fetchProfile, 30000); // 30s polling
+        return () => clearInterval(intervalId);
+    }, [user.user_id]);
 
     const handleSaveProfile = async () => {
         setIsLoading(true);
@@ -65,7 +95,27 @@ const UserProfile = () => {
         }
     };
 
+    const validatePassword = (password) => {
+        if (password.length < 8) return "Password must be at least 8 characters long.";
+        if (!/[A-Z]/.test(password)) return "Password must contain at least one uppercase letter.";
+        if (!/[a-z]/.test(password)) return "Password must contain at least one lowercase letter.";
+        if (!/\d/.test(password)) return "Password must contain at least one numeric digit.";
+        if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) return "Password must contain at least one special character.";
+        return null;
+    };
+
     const handleChangePassword = async () => {
+        if (!passwordData.current_password) {
+            addToast("Current password is required", 'error');
+            return;
+        }
+
+        const passwordError = validatePassword(passwordData.new_password);
+        if (passwordError) {
+            addToast(passwordError, "error");
+            return;
+        }
+
         if (passwordData.new_password !== passwordData.confirm_password) {
             addToast("New passwords don't match", 'error');
             return;
@@ -229,7 +279,10 @@ const UserProfile = () => {
                                         setFormData({
                                             name: user.name || '',
                                             skin_type: user.skin_type || '',
-                                            email: user.email || ''
+                                            email: user.email || '',
+                                            gender: user.gender || '',
+                                            birth_date: user.birth_date || '',
+                                            allergies: Array.isArray(user.allergies) ? user.allergies.join(', ') : (user.allergies || '')
                                         });
                                     }}
                                     disabled={isLoading}
@@ -316,6 +369,89 @@ const UserProfile = () => {
                                         )}
                                     </div>
                                     {isEditing && <span className="absolute right-4 text-gray-400 pointer-events-none">▼</span>}
+                                </div>
+                            </div>
+
+                            {/* Gender Field */}
+                            <div className="group">
+                                <div className="flex items-center justify-between pointer-events-none">
+                                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block pl-1">Gender</label>
+                                </div>
+                                <div className={`relative flex items-center p-4 bg-gray-50 rounded-2xl border-2 transition-all ${isEditing ? 'border-teal-100 bg-white' : 'border-transparent'}`}>
+                                    <div className="p-2.5 bg-white rounded-xl text-indigo-400 shadow-sm mr-4">
+                                        <UserCircle size={20} />
+                                    </div>
+                                    <div className="flex-1">
+                                        {isEditing ? (
+                                            <select
+                                                value={formData.gender}
+                                                onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                                                className="block w-full bg-transparent text-gray-900 font-bold focus:outline-none appearance-none cursor-pointer"
+                                            >
+                                                <option value="">Select Gender</option>
+                                                <option value="Male">Male</option>
+                                                <option value="Female">Female</option>
+                                                <option value="Other">Other</option>
+                                                <option value="Prefer not to say">Prefer not to say</option>
+                                            </select>
+                                        ) : (
+                                            <div className="font-bold text-xl text-gray-900">{user.gender || 'Not specified'}</div>
+                                        )}
+                                    </div>
+                                    {isEditing && <span className="absolute right-4 text-gray-400 pointer-events-none">▼</span>}
+                                </div>
+                            </div>
+
+                            {/* Birth Date Field */}
+                            <div className="group">
+                                <div className="flex items-center justify-between pointer-events-none">
+                                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block pl-1">Date of Birth</label>
+                                </div>
+                                <div className={`relative flex items-center p-4 bg-gray-50 rounded-2xl border-2 transition-all ${isEditing ? 'border-teal-100 bg-white' : 'border-transparent'}`}>
+                                    <div className="p-2.5 bg-white rounded-xl text-pink-400 shadow-sm mr-4">
+                                        <Gift size={20} />
+                                    </div>
+                                    <div className="flex-1">
+                                        {isEditing ? (
+                                            <input
+                                                type="date"
+                                                value={formData.birth_date}
+                                                onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
+                                                className="block w-full bg-transparent text-gray-900 font-bold focus:outline-none cursor-pointer"
+                                            />
+                                        ) : (
+                                            <div className="font-bold text-xl text-gray-900">{user.birth_date ? new Date(user.birth_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not specified'}</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Allergies Field */}
+                            <div className="group">
+                                <div className="flex items-center justify-between pointer-events-none">
+                                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block pl-1">Known Allergies</label>
+                                </div>
+                                <div className={`relative flex items-center p-4 bg-gray-50 rounded-2xl border-2 transition-all ${isEditing ? 'border-teal-100 bg-white' : 'border-transparent'}`}>
+                                    <div className="p-2.5 bg-white rounded-xl text-orange-400 shadow-sm mr-4">
+                                        <AlertTriangle size={20} />
+                                    </div>
+                                    <div className="flex-1">
+                                        {isEditing ? (
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. Salicylic Acid, Peanuts, None"
+                                                value={formData.allergies}
+                                                onChange={(e) => setFormData({ ...formData, allergies: e.target.value })}
+                                                className="block w-full bg-transparent text-gray-900 font-bold focus:outline-none"
+                                            />
+                                        ) : (
+                                            <div className="font-bold text-xl text-gray-900 truncate pr-4">
+                                                {Array.isArray(user.allergies) && user.allergies.length > 0
+                                                    ? user.allergies.join(', ')
+                                                    : (typeof user.allergies === 'string' && user.allergies.length > 0 ? user.allergies : 'None Reported')}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 
